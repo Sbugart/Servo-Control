@@ -1,18 +1,18 @@
-#include "../lib/esc_pwm.hpp"
+#include "../lib/esp_pwm.hpp"
 
-ESC_PWM::ESC_PWM(ledc_channel_t channel,ledc_timer_t timer,ledc_mode_t speed_mode)
+ESP_PWM::ESP_PWM(ledc_channel_t channel,ledc_timer_t timer,ledc_mode_t speed_mode)
 {
     this->channel = channel;
     this->timer = timer;
     this->speed_mode = speed_mode;
 }
 
-
-bool ESC_PWM::attach(int pin, uint32_t freq, int resolution)
+bool ESP_PWM::attach(int pin, uint32_t freq, int resolution)
 {
     this->pin = pin;
     this->freq = freq;
     this->resolution = resolution;
+    this->duty = 0;
 
     max_duty = (1 << resolution) - 1;
 
@@ -41,14 +41,11 @@ bool ESC_PWM::attach(int pin, uint32_t freq, int resolution)
     return true;
 }
 
-bool ESC_PWM::set_pulse_width(uint32_t pulse_us)
+bool ESP_PWM::set_pulse_width(uint32_t pulse_us)
 {   
     uint32_t period_us = 1000000 / freq;
 
-    uint32_t duty = (pulse_us * max_duty) / period_us;
-
-    ledc_set_duty(speed_mode, channel, duty);
-    ledc_update_duty(speed_mode, channel);
+    this->duty = (pulse_us * max_duty) / period_us;
 
     return true;
 }
@@ -59,7 +56,7 @@ min_pulse = 500
 max_pulse = 2500
 center = 1500
 */
-bool ESC_PWM::set_angle(float angle)
+bool ESP_PWM::set_angle(int angle)
 {
     if(angle < -90) angle = -90;
     if(angle > 90) angle = 90;
@@ -67,4 +64,35 @@ bool ESC_PWM::set_angle(float angle)
     uint32_t pulse = 1500 + angle * (2000.0 / 180.0);
 
     return set_pulse_width(pulse);
+}
+
+bool ESP_PWM::update()
+{
+    ledc_set_duty(speed_mode, channel, duty);
+    ledc_update_duty(speed_mode, channel);
+    return true;
+}
+
+void ESP_PWM::servo_task(void *pvParameters)
+{
+    ESP_PWM* servo = (ESP_PWM*) pvParameters;
+
+    while(true)
+    {
+        servo->update();
+        vTaskDelay(pdMS_TO_TICKS(20)); // 50Hz
+    }
+}
+
+void ESP_PWM::start(int core)
+{
+    xTaskCreatePinnedToCore(
+        servo_task,
+        "servo_task",
+        2048,
+        this,
+        5,
+        &task_handle,
+        core
+    );
 }
